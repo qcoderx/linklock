@@ -223,6 +223,51 @@ export async function simulateInboundPayment(order) {
   });
 }
 
+const PAID_STATUSES = ['PAID', 'SUCCESS', 'SUCCESSFUL', 'COMPLETED'];
+
+/**
+ * Poll Monnify directly for a real inbound transfer on this order's reserved account.
+ * Acts as the "verify" half of a checkout flow (a la Paystack): the buyer actually moves
+ * money (real transfer, or via Monnify's sandbox banking-app simulator), then this call
+ * confirms it happened and drives CREATED → LOCKED off the real transaction — same path
+ * the webhook would take, just pulled instead of pushed. Idempotent: if the payment already
+ * landed via webhook, handleInboundPayment's own idempotency short-circuits it here too.
+ */
+export async function checkRealPayment(order) {
+  if (order.account_mode !== 'LIVE') {
+    throw new Error('This order has no real Monnify account to check (simulation mode)');
+  }
+  if (order.state !== STATES.CREATED) {
+    return { order, matched: true, alreadyProcessed: true };
+  }
+
+  const rb = await monnify.getReservedAccountTransactions(order.va_reference);
+  const txns = rb?.content || rb?.responseBody?.content || [];
+  const hit = txns.find((t) => {
+    const status = String(t.paymentStatus || t.transactionStatus || '').toUpperCase();
+    const amountPaid = Number(t.amountPaid ?? t.settlementAmount ?? t.amount ?? 0);
+    return PAID_STATUSES.includes(status) && amountPaid >= Number(order.amount);
+  });
+
+  if (!hit) {
+    return { order, matched: false };
+  }
+
+  const src = Array.isArray(hit.paymentSourceInformation) ? hit.paymentSourceInformation[0] : hit.paymentSourceInformation;
+  const { order: updated } = await handleInboundPayment({
+    order,
+    amountPaid: Number(hit.amountPaid ?? hit.settlementAmount ?? hit.amount ?? order.amount),
+    paymentReference: hit.paymentReference,
+    transactionReference: hit.transactionReference,
+    source: {
+      accountNumber: src?.accountNumber,
+      bankCode: src?.bankCode,
+      accountName: src?.accountName || hit.customer?.name,
+    },
+  });
+  return { order: updated, matched: true };
+}
+
 /* ─────────────────── ship & prove: LOCKED → SHIPPED ─────────────────── */
 
 export function markShipped(order, { dispatchReference }) {

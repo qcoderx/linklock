@@ -85,11 +85,27 @@ function Ticket({ order, refresh }) {
 function PayOrStatus({ order, refresh }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
+  const isLive = order.accountMode === 'LIVE';
 
   async function simulate() {
     setBusy(true);
     try { await api.simulatePayment(order.ref); await refresh(); toast('Payment received — funds locked', 'success'); }
     catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
+  }
+
+  // LIVE orders: money must actually move (real transfer, or Monnify's sandbox banking-app
+  // simulator) before this can succeed — it polls Monnify for a real matching transaction.
+  async function checkPayment() {
+    setBusy(true);
+    try {
+      const res = await api.checkPayment(order.ref);
+      if (res.paymentDetected === false) {
+        toast('No transfer detected yet — send it, then tap this again', 'error');
+      } else {
+        await refresh();
+        toast('Payment received — funds locked', 'success');
+      }
+    } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
   }
 
   // A real disbursement is in flight and needs OTP authorization — show that first.
@@ -122,10 +138,25 @@ function PayOrStatus({ order, refresh }) {
           Open your normal banking app and transfer <span className="font-mono text-ink">{naira(order.amount)}</span>.
           The moment it lands, LinkLock locks it and tells the vendor it is safe to ship.
         </p>
-        <button onClick={simulate} disabled={busy} className="btn-ink w-full">
-          {busy ? <><Spinner width={18} height={18} /> Detecting payment…</> : <>Simulate the transfer (demo) </>}
-        </button>
-        <p className="text-center text-[11px] text-muted">In production this happens automatically via the Monnify inbound webhook.</p>
+        {isLive ? (
+          <>
+            <a href="https://websim.sdk.monnify.com/?#/bankingapp" target="_blank" rel="noreferrer"
+              className="block text-center text-[12px] text-gold-deep underline underline-offset-2">
+              Testing? Send it via Monnify's sandbox bank simulator ↗
+            </a>
+            <button onClick={checkPayment} disabled={busy} className="btn-ink w-full">
+              {busy ? <><Spinner width={18} height={18} /> Checking for payment…</> : <>I've paid</>}
+            </button>
+            <p className="text-center text-[11px] text-muted">This checks Monnify directly for the transfer — no webhook required.</p>
+          </>
+        ) : (
+          <>
+            <button onClick={simulate} disabled={busy} className="btn-ink w-full">
+              {busy ? <><Spinner width={18} height={18} /> Detecting payment…</> : <>Simulate the transfer (demo) </>}
+            </button>
+            <p className="text-center text-[11px] text-muted">In production this happens automatically via the Monnify inbound webhook.</p>
+          </>
+        )}
       </div>
     );
   }

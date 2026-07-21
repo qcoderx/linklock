@@ -55,6 +55,20 @@ router.post('/:ref/simulate-payment', loadOrder, ah(async (req, res) => {
   res.json(svc.serializeOrder(order));
 }));
 
+/*
+ * "I've paid" for real (LIVE) orders: the buyer actually sends money to the reserved
+ * account (real transfer, or Monnify's sandbox banking-app simulator), then hits this to
+ * verify — polls Monnify directly rather than waiting on the webhook, so it works even if
+ * the webhook URL isn't configured yet.
+ */
+router.post('/:ref/check-payment', loadOrder, ah(async (req, res) => {
+  if (req.order.account_mode !== 'LIVE') return bad(res, 'This order is in simulation mode — use simulate-payment instead', 409);
+  if (req.order.state !== STATES.CREATED) return res.json(svc.serializeOrder(req.order));
+  const { order, matched } = await svc.checkRealPayment(req.order);
+  if (!matched) return res.status(202).json({ ...svc.serializeOrder(order), paymentDetected: false });
+  res.json({ ...svc.serializeOrder(order), paymentDetected: true });
+}));
+
 /* Vendor: ship & prove. Uploads dispatch proof; AI gates genuineness before SHIPPED. */
 router.post('/:ref/ship', loadOrder, upload.single('proof'), ah(async (req, res) => {
   const order = req.order;

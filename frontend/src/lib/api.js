@@ -38,6 +38,7 @@ export const api = {
   createOrder: (body) => req('/orders', { method: 'POST', body }),
   getOrder: (ref) => req(`/orders/${ref}`),
   simulatePayment: (ref) => req(`/orders/${ref}/simulate-payment`, { method: 'POST' }),
+  checkPayment: (ref) => req(`/orders/${ref}/check-payment`, { method: 'POST' }),
   ship: (ref, form) => req(`/orders/${ref}/ship`, { method: 'POST', form }),
   deliver: (ref) => req(`/orders/${ref}/deliver`, { method: 'POST' }),
   confirm: (ref) => req(`/orders/${ref}/confirm`, { method: 'POST' }),

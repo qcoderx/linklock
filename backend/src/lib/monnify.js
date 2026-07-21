@@ -91,7 +91,7 @@ export async function createReservedAccount({ accountReference, accountName, cus
 
 export async function getReservedAccountTransactions(accountReference) {
   return authed(
-    `/api/v2/bank-transfer/reserved-accounts/transactions?accountReference=${encodeURIComponent(accountReference)}&page=0&size=10`,
+    `/api/v1/bank-transfer/reserved-accounts/transactions?accountReference=${encodeURIComponent(accountReference)}&page=0&size=10`,
   );
 }
 
