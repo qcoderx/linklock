@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Page } from '../components/Layout.jsx';
-import { Lockmark } from '../components/Logo.jsx';
 import { CopyField } from '../components/CopyField.jsx';
 import { useToast } from '../components/Toast.jsx';
 import { Lock, Shield, Sparkles, Link as LinkIcon, Arrow, Spinner, Check, Truck, Alert } from '../components/Icons.jsx';
@@ -9,10 +8,10 @@ import { api } from '../lib/api.js';
 import { naira } from '../lib/format.js';
 
 const STEPS = [
-  { icon: LinkIcon, t: 'Drop a link', d: 'Type the order once. LinkLock mints an isolated bank account and hands you a link to drop in the chat.' },
-  { icon: Lock, t: 'Money is caught & locked', d: 'The buyer pays from their normal banking app. The instant it lands, it locks — and the vendor is told it is safe to ship.' },
-  { icon: Truck, t: 'Ship with proof', d: 'The vendor uploads a photo of the sealed item. AI checks it is genuine before the order can progress.' },
-  { icon: Check, t: 'Release or dispute', d: 'Buyer taps confirm and the vault pays out in seconds. Silence auto-releases. A problem freezes the funds — cleanly reversible.' },
+  { img: '/assets/icon-link.png', t: 'Drop a link', d: 'Type the order once. LinkLock mints an isolated bank account and hands you a link to drop in the chat.' },
+  { img: '/assets/icon-lock.png', t: 'Money is caught & locked', d: 'The buyer pays from their normal banking app. The instant it lands, it locks — and the vendor is told it is safe to ship.' },
+  { img: '/assets/icon-ship.png', t: 'Ship with proof', d: 'The vendor uploads a photo of the sealed item. AI checks it is genuine before the order can progress.' },
+  { img: '/assets/icon-check.png', t: 'Release or dispute', d: 'Buyer taps confirm and the vault pays out in seconds. Silence auto-releases. A problem freezes the funds — cleanly reversible.' },
 ];
 
 export default function Home() {
@@ -98,10 +97,8 @@ export default function Home() {
 
           <div className="mt-7 grid sm:grid-cols-2 gap-3 max-w-xl">
             {STEPS.map((s, i) => (
-              <div key={s.t} className="flex gap-3 rounded-xl2 border border-line bg-paper p-3.5 shadow-sm">
-                <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gold-soft text-gold-deep">
-                  <s.icon width={18} height={18} />
-                </span>
+              <div key={s.t} className="flex gap-3 rounded-xl2 border border-line bg-paper p-3.5 shadow-sm transition-shadow hover:shadow-ticket">
+                <img src={s.img} alt="" aria-hidden="true" className="mt-0.5 h-12 w-12 shrink-0 object-contain drop-shadow-[0_6px_10px_rgba(224,148,0,0.25)]" />
                 <div>
                   <div className="text-sm font-semibold text-ink flex items-center gap-2">
                     <span className="font-mono text-[11px] text-gold-deep">0{i + 1}</span>{s.t}
@@ -114,17 +111,19 @@ export default function Home() {
         </div>
 
         {/* GENERATOR / RESULT */}
-        <div className="lg:sticky lg:top-24">
+        <div className="lg:sticky lg:top-24 relative">
+          <img
+            src="/assets/hero-padlock.png"
+            alt="LinkLock secure vault"
+            className="pointer-events-none select-none absolute -top-12 -right-3 sm:-right-5 w-24 sm:w-28 md:w-32 z-20 animate-float drop-shadow-[0_20px_34px_rgba(224,148,0,0.4)]"
+          />
           {created ? (
             <CreatedCard order={created} onReset={() => { setCreated(null); setForm((f) => ({ ...f, itemDescription: '', amount: '', buyerContact: '' })); }} />
           ) : (
             <form onSubmit={submit} className="card p-5 sm:p-6 animate-rise">
-              <div className="flex items-center gap-2.5 mb-4">
-                <Lockmark size={38} />
-                <div>
-                  <h2 className="text-lg font-bold text-ink leading-tight">Create a locked link</h2>
-                  <p className="text-xs text-muted">Takes about five seconds. No account.</p>
-                </div>
+              <div className="mb-4 pr-16">
+                <h2 className="text-lg font-bold text-ink leading-tight">Create a locked link</h2>
+                <p className="text-xs text-muted">Takes about five seconds. No account.</p>
               </div>
 
               <div className="space-y-3.5">

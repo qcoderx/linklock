@@ -57,6 +57,10 @@ export default {
           '70%': { boxShadow: '0 0 0 12px rgba(245,179,1,0)' },
           '100%': { boxShadow: '0 0 0 0 rgba(245,179,1,0)' },
         },
+        'float': {
+          '0%, 100%': { transform: 'translateY(0) rotate(-4deg)' },
+          '50%': { transform: 'translateY(-10px) rotate(-1deg)' },
+        },
       },
       animation: {
         'lock-click': 'lock-click 0.5s cubic-bezier(0.34,1.56,0.64,1) both',
@@ -64,6 +68,7 @@ export default {
         'rise': 'rise 0.5s ease-out both',
         'sheen': 'sheen 2.2s linear infinite',
         'pulse-ring': 'pulse-ring 1.8s ease-out infinite',
+        'float': 'float 5s ease-in-out infinite',
       },
     },
   },
