@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+    font-feature-settings: 'ss01', 'cv05';
+  }
+  /* Warm, paper-like ambient background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(60rem 40rem at 82% -8%, rgba(245, 179, 1, 0.14), transparent 60%),
+      radial-gradient(48rem 40rem at -10% 8%, rgba(245, 179, 1, 0.08), transparent 55%);
+  }
+  :focus-visible {
+    @apply outline-none ring-2 ring-gold-deep ring-offset-2 ring-offset-canvas;
+  }
+  h1, h2, h3 {
+    @apply tracking-tight;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-paper border border-line rounded-xl2 shadow-ticket;
+  }
+  .eyebrow {
+    @apply font-mono text-[0.7rem] uppercase tracking-[0.18em] text-muted;
+  }
+  .label {
+    @apply block text-sm font-medium text-ink mb-1.5;
+  }
+  .input {
+    @apply w-full rounded-xl border border-line bg-paper px-3.5 py-2.5 text-[15px] text-ink
+           placeholder:text-muted/60 transition-colors
+           focus:border-gold-deep focus:ring-2 focus:ring-gold/40 focus:outline-none;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[15px] font-semibold
+           transition-all duration-200 cursor-pointer select-none disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-gold {
+    @apply btn bg-gold text-ink shadow-gold hover:bg-gold-deep hover:text-ink active:translate-y-px;
+  }
+  .btn-ink {
+    @apply btn bg-ink text-paper hover:bg-ink/90 active:translate-y-px;
+  }
+  .btn-ghost {
+    @apply btn bg-paper text-ink border border-line hover:border-gold-deep hover:bg-gold-soft/40;
+  }
+  .btn-danger {
+    @apply btn bg-paper text-state-freeze border border-state-freeze/30 hover:bg-state-freeze/5;
+  }
+  /* perforated ticket edge */
+  .perf {
+    background-image: radial-gradient(circle at center, transparent 5px, currentColor 5px, currentColor 6px, transparent 6px);
+    background-size: 18px 12px;
+    background-repeat: repeat-x;
+    background-position: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

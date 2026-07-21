@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Env & secrets — NEVER commit
+.env
+*.env
+!.env.example
+backend/.env
+frontend/.env
+
+# Data & uploads (runtime)
+backend/data/*.db
+backend/data/*.db-*
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Build output
+frontend/dist/
+dist/
+
+# Logs / OS
+*.log
+.DS_Store
+Thumbs.db
+scripts/*.json
