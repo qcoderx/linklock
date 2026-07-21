@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { config, monnifyLive, summarizeConfig } from '../config.js';
-import { getBanks } from '../lib/monnify.js';
+import { getBanks, validateAccount } from '../lib/monnify.js';
 
 const router = Router();
 
@@ -21,6 +21,21 @@ const FALLBACK_BANKS = [
 
 router.get('/status', (_req, res) => {
   res.json({ ok: true, service: 'linklock', ...summarizeConfig() });
+});
+
+// Name enquiry: resolve the account holder's name for a bank + account number.
+router.get('/banks/resolve', async (req, res) => {
+  const accountNumber = String(req.query.accountNumber || '').trim();
+  const bankCode = String(req.query.bankCode || '').trim();
+  if (!/^\d{10}$/.test(accountNumber) || !bankCode) {
+    return res.status(400).json({ error: 'accountNumber (10 digits) and bankCode are required' });
+  }
+  try {
+    const rb = await validateAccount({ accountNumber, bankCode });
+    res.json({ accountName: rb.accountName, accountNumber: rb.accountNumber, bankCode: rb.bankCode });
+  } catch (err) {
+    res.status(422).json({ error: err.message || 'Could not resolve this account' });
+  }
 });
 
 router.get('/banks', async (_req, res) => {

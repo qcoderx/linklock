@@ -4,7 +4,7 @@ import { Page } from '../components/Layout.jsx';
 import { Lockmark } from '../components/Logo.jsx';
 import { CopyField } from '../components/CopyField.jsx';
 import { useToast } from '../components/Toast.jsx';
-import { Lock, Shield, Sparkles, Link as LinkIcon, Arrow, Spinner, Check, Truck } from '../components/Icons.jsx';
+import { Lock, Shield, Sparkles, Link as LinkIcon, Arrow, Spinner, Check, Truck, Alert } from '../components/Icons.jsx';
 import { api } from '../lib/api.js';
 import { naira } from '../lib/format.js';
 
@@ -24,6 +24,7 @@ export default function Home() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState(null);
+  const [resolve, setResolve] = useState({ state: 'idle', name: '', error: '' }); // idle|resolving|ok|error
   const toast = useToast();
 
   useEffect(() => {
@@ -35,6 +36,30 @@ export default function Home() {
   const valid = useMemo(() =>
     form.itemDescription.trim().length > 1 && Number(form.amount) > 0 &&
     form.vendorBankCode && /^\d{10}$/.test(form.vendorAccountNumber), [form]);
+
+  // Live name enquiry: resolve the payout account holder as soon as bank + 10 digits are entered.
+  useEffect(() => {
+    const acct = form.vendorAccountNumber;
+    if (!form.vendorBankCode || !/^\d{10}$/.test(acct)) {
+      setResolve({ state: 'idle', name: '', error: '' });
+      return;
+    }
+    let cancelled = false;
+    setResolve({ state: 'resolving', name: '', error: '' });
+    const t = setTimeout(async () => {
+      try {
+        const r = await api.resolveAccount(form.vendorBankCode, acct);
+        if (cancelled) return;
+        setResolve({ state: 'ok', name: r.accountName, error: '' });
+        setForm((f) => ({ ...f, vendorAccountName: r.accountName }));
+      } catch (err) {
+        if (cancelled) return;
+        setResolve({ state: 'error', name: '', error: err.message || 'Could not verify account' });
+        setForm((f) => ({ ...f, vendorAccountName: '' }));
+      }
+    }, 450);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [form.vendorBankCode, form.vendorAccountNumber]);
 
   async function submit(e) {
     e.preventDefault();
@@ -130,12 +155,15 @@ export default function Home() {
                     </div>
                     <div>
                       <label className="label" htmlFor="acct">Account number</label>
-                      <input id="acct" inputMode="numeric" maxLength={10} className="input font-mono" placeholder="0123456789" value={form.vendorAccountNumber} onChange={set('vendorAccountNumber')} />
+                      <input id="acct" inputMode="numeric" maxLength={10} className="input font-mono" placeholder="0068687503" value={form.vendorAccountNumber} onChange={set('vendorAccountNumber')} />
                     </div>
                   </div>
+
+                  <AccountResolution resolve={resolve} />
+
                   <div>
-                    <label className="label" htmlFor="vname">Account / vendor name</label>
-                    <input id="vname" className="input" placeholder="Boutique XYZ" value={form.vendorName} onChange={(e) => setForm((f) => ({ ...f, vendorName: e.target.value, vendorAccountName: e.target.value }))} />
+                    <label className="label" htmlFor="vname">Your business name <span className="text-muted font-normal">(optional)</span></label>
+                    <input id="vname" className="input" placeholder="Boutique XYZ" value={form.vendorName} onChange={set('vendorName')} />
                   </div>
                 </div>
               </div>
@@ -153,6 +181,31 @@ export default function Home() {
         </div>
       </section>
     </Page>
+  );
+}
+
+function AccountResolution({ resolve }) {
+  if (resolve.state === 'idle') return null;
+  if (resolve.state === 'resolving') {
+    return (
+      <div className="flex items-center gap-2 rounded-lg bg-canvas border border-line px-3 py-2 text-sm text-muted">
+        <Spinner width={15} height={15} /> Verifying account…
+      </div>
+    );
+  }
+  if (resolve.state === 'ok') {
+    return (
+      <div className="flex items-center gap-2 rounded-lg bg-state-safe/10 border border-state-safe/25 px-3 py-2 animate-pop-in">
+        <Check width={16} height={16} className="text-state-safe shrink-0" />
+        <span className="font-mono text-sm font-medium text-ink uppercase truncate">{resolve.name}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 rounded-lg bg-state-freeze/10 border border-state-freeze/25 px-3 py-2 text-sm text-state-freeze">
+      <Alert width={15} height={15} className="shrink-0" />
+      <span className="truncate">Couldn’t verify this account — double-check the number.</span>
+    </div>
   );
 }
 

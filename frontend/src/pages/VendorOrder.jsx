@@ -8,6 +8,7 @@ import { StateBadge } from '../components/StateBadge.jsx';
 import { AiVerdict, AiComparison } from '../components/AiVerdict.jsx';
 import { EvidenceUpload } from '../components/EvidenceUpload.jsx';
 import { MessageFeed } from '../components/MessageFeed.jsx';
+import { OtpPrompt } from '../components/OtpPrompt.jsx';
 import { useToast } from '../components/Toast.jsx';
 import { useOrder } from '../hooks/useOrder.js';
 import { api } from '../lib/api.js';
@@ -53,6 +54,14 @@ export default function VendorOrder() {
 }
 
 function VendorAction({ order, refresh }) {
+  if (order.releaseAuthorization?.required) {
+    return (
+      <Panel tone="gold">
+        <p className="text-sm text-muted mb-3">The payout to your account has been initiated and just needs the Monnify OTP to complete.</p>
+        <OtpPrompt order={order} onDone={refresh} />
+      </Panel>
+    );
+  }
   if (order.state === 'CREATED') return <AwaitingPayment order={order} />;
   if (order.state === 'LOCKED') return <ShipAndProve order={order} refresh={refresh} />;
   if (order.state === 'SHIPPED') return <MarkDelivered order={order} refresh={refresh} />;

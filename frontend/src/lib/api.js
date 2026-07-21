@@ -31,6 +31,8 @@ async function req(path, { method = 'GET', body, form, token } = {}) {
 export const api = {
   status: () => req('/status'),
   banks: () => req('/banks'),
+  resolveAccount: (bankCode, accountNumber) =>
+    req(`/banks/resolve?bankCode=${encodeURIComponent(bankCode)}&accountNumber=${encodeURIComponent(accountNumber)}`),
 
   createOrder: (body) => req('/orders', { method: 'POST', body }),
   getOrder: (ref) => req(`/orders/${ref}`),
@@ -38,6 +40,8 @@ export const api = {
   ship: (ref, form) => req(`/orders/${ref}/ship`, { method: 'POST', form }),
   deliver: (ref) => req(`/orders/${ref}/deliver`, { method: 'POST' }),
   confirm: (ref) => req(`/orders/${ref}/confirm`, { method: 'POST' }),
+  authorizeRelease: (ref, otp) => req(`/orders/${ref}/authorize-release`, { method: 'POST', body: { otp } }),
+  resendOtp: (ref) => req(`/orders/${ref}/resend-otp`, { method: 'POST' }),
   dispute: (ref, form) => req(`/orders/${ref}/dispute`, { method: 'POST', form }),
   vendorResponse: (ref, response) => req(`/orders/${ref}/vendor-response`, { method: 'POST', body: { response } }),
 

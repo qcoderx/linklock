@@ -7,6 +7,7 @@ import { StatusRail } from '../components/StatusRail.jsx';
 import { StateBadge } from '../components/StateBadge.jsx';
 import { AiVerdict, AiComparison } from '../components/AiVerdict.jsx';
 import { EvidenceUpload } from '../components/EvidenceUpload.jsx';
+import { OtpPrompt } from '../components/OtpPrompt.jsx';
 import { useToast } from '../components/Toast.jsx';
 import { useOrder } from '../hooks/useOrder.js';
 import { api } from '../lib/api.js';
@@ -89,6 +90,18 @@ function PayOrStatus({ order, refresh }) {
     setBusy(true);
     try { await api.simulatePayment(order.ref); await refresh(); toast('Payment received — funds locked', 'success'); }
     catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
+  }
+
+  // A real disbursement is in flight and needs OTP authorization — show that first.
+  if (order.releaseAuthorization?.required) {
+    return (
+      <div className="space-y-3">
+        <div className="rounded-xl border border-state-safe/25 bg-state-safe/5 px-4 py-3 text-sm text-ink flex items-center gap-2">
+          <Check width={16} height={16} className="text-state-safe" /> Confirmed. Releasing your payment to the vendor…
+        </div>
+        <OtpPrompt order={order} onDone={refresh} />
+      </div>
+    );
   }
 
   if (order.state === 'CREATED') {
@@ -179,8 +192,11 @@ function ConfirmOrDispute({ order, refresh }) {
 
   async function confirm() {
     setBusy(true);
-    try { await api.confirm(order.ref); await refresh(); toast('Confirmed — vendor paid instantly', 'success'); }
-    catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
+    try {
+      const updated = await api.confirm(order.ref);
+      await refresh();
+      toast(updated.releaseAuthorization?.required ? 'Confirmed — authorizing the payout…' : 'Confirmed — vendor paid', 'success');
+    } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
   }
 
   async function submitDispute(e) {

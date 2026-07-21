@@ -110,29 +110,24 @@ export async function disburseSingle({ amount, reference, narration, destination
     currency: 'NGN',
     sourceAccountNumber: config.monnify.walletAccount,
   };
-  const result = await authed('/api/v2/disbursements/single', { method: 'POST', body });
-
-  // Wallet Transfer-2FA is on when Monnify replies PENDING_AUTHORIZATION. Try to auto-authorize
-  // with the configured OTP; if that fails, surface the pending state instead of throwing so the
-  // caller can decide (real authorization vs. demo completion).
-  if (result?.status === 'PENDING_AUTHORIZATION') {
-    if (config.monnify.disbursementOtp) {
-      try {
-        const authorized = await authorizeTransfer(reference, config.monnify.disbursementOtp);
-        return { ...authorized, authorized: true };
-      } catch (err) {
-        return { ...result, pendingAuthorization: true, authorizationError: err.message };
-      }
-    }
-    return { ...result, pendingAuthorization: true };
-  }
-  return result;
+  // Returns the raw responseBody. status is SUCCESS (2FA off) or PENDING_AUTHORIZATION (2FA on,
+  // Monnify emails an OTP → authorize via authorizeTransfer). The caller drives the OTP step.
+  return authed('/api/v2/disbursements/single', { method: 'POST', body });
 }
 
+/** Authorize a PENDING_AUTHORIZATION transfer with the OTP Monnify emailed. */
 export async function authorizeTransfer(reference, authorizationCode) {
   return authed('/api/v2/disbursements/single/validate-otp', {
     method: 'POST',
     body: { reference, authorizationCode },
+  });
+}
+
+/** Ask Monnify to resend the transfer authorization OTP. */
+export async function resendOtp(reference) {
+  return authed('/api/v2/disbursements/single/resend-otp', {
+    method: 'POST',
+    body: { reference },
   });
 }
 
@@ -156,6 +151,16 @@ export async function initiateRefund({ transactionReference, refundReference, re
 
 export async function getBanks() {
   return authed('/api/v1/banks');
+}
+
+/**
+ * Name enquiry — resolve the account holder's name for a bank + account number.
+ * Free on sandbox and live. Returns { accountNumber, accountName, bankCode }.
+ */
+export async function validateAccount({ accountNumber, bankCode }) {
+  return authed(
+    `/api/v1/disbursements/account/validate?accountNumber=${encodeURIComponent(accountNumber)}&bankCode=${encodeURIComponent(bankCode)}`,
+  );
 }
 
 /**

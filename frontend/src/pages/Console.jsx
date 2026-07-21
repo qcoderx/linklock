@@ -3,6 +3,7 @@ import { Page } from '../components/Layout.jsx';
 import { StateBadge } from '../components/StateBadge.jsx';
 import { AiComparison } from '../components/AiVerdict.jsx';
 import { AiVerdict } from '../components/AiVerdict.jsx';
+import { OtpPrompt } from '../components/OtpPrompt.jsx';
 import { useToast } from '../components/Toast.jsx';
 import { api } from '../lib/api.js';
 import { naira, timeAgo } from '../lib/format.js';
@@ -149,7 +150,9 @@ function ReviewCard({ order, token, onDone }) {
 
       {order.dispute?.aiComparison && <div className="mb-3"><AiComparison comparison={order.dispute.aiComparison} /></div>}
 
-      {order.state === 'UNDER_REVIEW' ? (
+      {order.releaseAuthorization?.required && <div className="mb-3"><OtpPrompt order={order} onDone={onDone} /></div>}
+
+      {order.state === 'UNDER_REVIEW' && !order.releaseAuthorization?.required ? (
         <>
           <input className="input mb-3" placeholder="Resolution note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
           <div className="flex flex-wrap gap-2.5">

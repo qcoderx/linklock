@@ -93,11 +93,25 @@ router.post('/:ref/deliver', loadOrder, ah(async (req, res) => {
   res.json(svc.serializeOrder(order));
 }));
 
-/* Buyer: confirm received → instant release to vendor. */
+/* Buyer: confirm received → real release to vendor (may require OTP authorization). */
 router.post('/:ref/confirm', loadOrder, ah(async (req, res) => {
   if (req.order.state !== STATES.DELIVERY_WINDOW) return bad(res, `Nothing to confirm (order is ${req.order.state})`, 409);
-  const order = await svc.buyerConfirm(req.order);
+  const result = await svc.buyerConfirm(req.order);
+  res.json(svc.serializeOrder(result.order || svc.getOrderById(req.order.id)));
+}));
+
+/* Authorize a pending release with the Monnify OTP → completes the real transfer. */
+router.post('/:ref/authorize-release', loadOrder, ah(async (req, res) => {
+  const otp = String(req.body?.otp || '').trim();
+  if (!otp) return bad(res, 'otp is required');
+  const order = await svc.authorizeRelease(req.order, { otp });
   res.json(svc.serializeOrder(order));
+}));
+
+/* Ask Monnify to resend the release OTP. */
+router.post('/:ref/resend-otp', loadOrder, ah(async (req, res) => {
+  const r = await svc.resendReleaseOtp(req.order);
+  res.json(r);
 }));
 
 /* Buyer: dispute (tap No) → freezes funds, uploads problem proof, runs AI checks. */

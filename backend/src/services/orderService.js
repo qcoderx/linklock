@@ -133,37 +133,39 @@ export async function createOrder(input) {
   return getOrderById(id);
 }
 
-/**
- * Normalize a Monnify disbursement response into a money-txn outcome, or throw.
- * Handles Transfer-2FA (PENDING_AUTHORIZATION): completes for the demo with a clearly
- * labeled DEMO_COMPLETION detail so the release flow never dead-ends, while still
- * pointing the operator at the real fix (disable 2FA / supply the OTP).
- */
 /** True only when a real Monnify collection backs this order (so a real refund is possible). */
 function hasRealPayment(order) {
   return order.account_mode === 'LIVE' && order.payment_reference && !String(order.payment_reference).startsWith('SIM');
 }
 
-function interpretDisbursement(res, refFallback) {
-  if (['SUCCESS', 'SUCCESSFUL', 'COMPLETED'].includes(res?.status)) {
-    return { status: 'SUCCESS', reference: res.reference || refFallback, detail: { monnifyStatus: res.status, sessionId: res.sessionId } };
+const SUCCESS_STATUSES = ['SUCCESS', 'SUCCESSFUL', 'COMPLETED'];
+
+/* Release-transaction helpers (release can legitimately sit PENDING while awaiting an OTP). */
+function getReleaseTxn(orderId) {
+  return db.prepare('SELECT * FROM transactions WHERE idempotency_key = ?').get(`${orderId}-release`);
+}
+function insertPendingRelease(orderId, amount, reference, detail) {
+  const id = uid('txn');
+  db.prepare(
+    `INSERT INTO transactions (id, order_id, type, amount, idempotency_key, status, monnify_reference, detail, occurred_at)
+     VALUES (?, ?, 'RELEASE', ?, ?, 'PENDING', ?, ?, ?)`,
+  ).run(id, orderId, amount, `${orderId}-release`, reference || null, detail ? JSON.stringify(detail) : null, now());
+  return db.prepare('SELECT * FROM transactions WHERE id = ?').get(id);
+}
+function markTxn(id, status, reference, detail) {
+  db.prepare('UPDATE transactions SET status = ?, monnify_reference = COALESCE(?, monnify_reference), detail = ? WHERE id = ?')
+    .run(status, reference || null, detail ? JSON.stringify(detail) : null, id);
+}
+
+/** Complete a release once the money is confirmed: transition (if applicable) + notify. */
+function finalizeRelease(order, { trigger, amount }) {
+  db.prepare('UPDATE orders SET released_at = ?, updated_at = ? WHERE id = ?').run(now(), now(), order.id);
+  if ([STATES.DELIVERY_WINDOW, STATES.UNDER_REVIEW].includes(order.state)) {
+    setState({ ...order }, STATES.RELEASED, { trigger });
   }
-  if (res?.pendingAuthorization) {
-    if (config.demoMode) {
-      return {
-        status: 'SUCCESS',
-        reference: res.reference || refFallback,
-        detail: {
-          mode: 'DEMO_COMPLETION',
-          monnifyStatus: 'PENDING_AUTHORIZATION',
-          authorizationError: res.authorizationError || null,
-          note: 'Monnify accepted the transfer but the wallet has Transfer-2FA enabled. Disable Transfer 2FA in the Monnify dashboard (or set MONNIFY_DISBURSEMENT_OTP to the emailed OTP) for a fully-authorized on-camera disbursement. Completed here for the demo.',
-        },
-      };
-    }
-    const e = new Error('Disbursement pending Monnify 2FA authorization'); e.status = 409; throw e;
-  }
-  const e = new Error(`Disbursement not successful (status: ${res?.status || 'unknown'})`); e.status = 502; throw e;
+  markDisputeResolved(order.id, 'RELEASE', `Released to vendor (${trigger}).`);
+  sendMessage(order.id, 'VENDOR', 'RELEASED',
+    `💸 ${order.ref}: ₦${fmt(amount)} released to your account (${order.vendor_account_number}). Trigger: ${trigger}.`);
 }
 
 function simulatedAccount(ref) {
@@ -251,35 +253,98 @@ export function reportDelivery(order) {
 
 /* ─────────────────── release to vendor (RELEASED) ─────────────────── */
 
+/**
+ * Release funds to the vendor via a REAL Monnify disbursement.
+ * Returns { released } on instant success, or { authorizationRequired, reference } when the
+ * wallet has Transfer-2FA on (Monnify emails an OTP → complete with authorizeRelease).
+ * Idempotent per order via the `${id}-release` transaction key.
+ */
 export async function releaseToVendor(order, { trigger }) {
   if (![STATES.DELIVERY_WINDOW, STATES.UNDER_REVIEW].includes(order.state)) {
-    assertTransition(order.state, STATES.RELEASED); // throws with clear message
+    assertTransition(order.state, STATES.RELEASED); // throws with a clear message
   }
   const amount = order.amount_paid ?? order.amount;
 
-  await recordMoney(order.id, 'RELEASE', amount, `${order.id}-release`, async () => {
-    if (order.account_mode === 'LIVE') {
-      const ref = `LL-REL-${order.id.slice(-10)}`;
-      const res = await monnify.disburseSingle({
-        amount,
-        reference: ref,
-        narration: `LinkLock release ${order.ref}`,
-        destinationBankCode: order.vendor_bank_code,
-        destinationAccountNumber: order.vendor_account_number,
-        destinationAccountName: order.vendor_account_name || order.vendor_name || 'Vendor',
-      });
-      return interpretDisbursement(res, ref);
-    }
-    return { status: 'SUCCESS', reference: `SIM-REL-${order.id.slice(-8)}`, detail: { simulated: true } };
-  });
+  const existing = getReleaseTxn(order.id);
+  if (existing?.status === 'SUCCESS') {
+    finalizeRelease(order, { trigger, amount });
+    return { released: true, order: getOrderById(order.id) };
+  }
+  if (existing?.status === 'PENDING') {
+    return { authorizationRequired: true, reference: existing.monnify_reference, order: getOrderById(order.id) };
+  }
 
-  db.prepare('UPDATE orders SET released_at = ?, updated_at = ? WHERE id = ?').run(now(), now(), order.id);
-  setState({ ...order, state: order.state }, STATES.RELEASED, { trigger });
-  markDisputeResolved(order.id, 'RELEASE', `Released to vendor (${trigger}).`);
+  // Simulation mode — no real payment ever landed, so there is nothing real to disburse.
+  if (order.account_mode !== 'LIVE') {
+    const txn = insertPendingRelease(order.id, amount, `SIM-REL-${order.id.slice(-8)}`, { simulated: true });
+    markTxn(txn.id, 'SUCCESS', txn.monnify_reference, { simulated: true });
+    finalizeRelease(order, { trigger, amount });
+    return { released: true, order: getOrderById(order.id) };
+  }
 
-  sendMessage(order.id, 'VENDOR', 'RELEASED',
-    `💸 ${order.ref}: ₦${fmt(amount)} released to your account (${order.vendor_account_number}). Trigger: ${trigger}.`);
+  // LIVE — real Monnify single disbursement from the wallet.
+  const ref = `LL-REL-${order.id.slice(-8)}-${Math.random().toString(36).slice(2, 6)}`;
+  const txn = insertPendingRelease(order.id, amount, ref, { initiated: true });
+  let res;
+  try {
+    res = await monnify.disburseSingle({
+      amount, reference: ref, narration: `LinkLock release ${order.ref}`,
+      destinationBankCode: order.vendor_bank_code,
+      destinationAccountNumber: order.vendor_account_number,
+      destinationAccountName: order.vendor_account_name || order.vendor_name || 'Vendor',
+    });
+  } catch (err) {
+    db.prepare('DELETE FROM transactions WHERE id = ?').run(txn.id); // allow a clean retry
+    throw err;
+  }
+
+  if (SUCCESS_STATUSES.includes(res?.status)) {
+    markTxn(txn.id, 'SUCCESS', res.reference || ref, { monnifyStatus: res.status, sessionId: res.sessionId });
+    finalizeRelease(order, { trigger, amount });
+    return { released: true, order: getOrderById(order.id) };
+  }
+  if (res?.status === 'PENDING_AUTHORIZATION') {
+    markTxn(txn.id, 'PENDING', res.reference || ref, { monnifyStatus: 'PENDING_AUTHORIZATION', trigger });
+    sendMessage(order.id, 'VENDOR', 'RELEASE_PENDING',
+      `🔐 ${order.ref}: payout of ₦${fmt(amount)} initiated — awaiting the Monnify OTP to authorize the transfer.`);
+    return { authorizationRequired: true, reference: res.reference || ref, order: getOrderById(order.id) };
+  }
+  db.prepare('DELETE FROM transactions WHERE id = ?').run(txn.id);
+  const e = new Error(`Disbursement not successful (status: ${res?.status || 'unknown'})`); e.status = 502; throw e;
+}
+
+/** Authorize a pending release with the OTP Monnify emailed → completes the real transfer. */
+export async function authorizeRelease(order, { otp }) {
+  const txn = getReleaseTxn(order.id);
+  if (!txn || txn.status !== 'PENDING') { const e = new Error('No release is awaiting authorization'); e.status = 409; throw e; }
+
+  if (order.account_mode !== 'LIVE') {
+    markTxn(txn.id, 'SUCCESS', txn.monnify_reference, { simulated: true });
+    finalizeRelease(order, { trigger: 'OTP_AUTH', amount: txn.amount });
+    return getOrderById(order.id);
+  }
+
+  let res;
+  try {
+    res = await monnify.authorizeTransfer(txn.monnify_reference, otp);
+  } catch (err) {
+    const e = new Error(err.message || 'Invalid authorization code'); e.status = 422; throw e;
+  }
+  if (!SUCCESS_STATUSES.includes(res?.status)) {
+    const e = new Error(`Authorization not successful (status: ${res?.status || 'unknown'})`); e.status = 422; throw e;
+  }
+  markTxn(txn.id, 'SUCCESS', res.reference || txn.monnify_reference, { monnifyStatus: res.status });
+  finalizeRelease(order, { trigger: 'OTP_AUTH', amount: txn.amount });
   return getOrderById(order.id);
+}
+
+/** Ask Monnify to resend the release OTP. */
+export async function resendReleaseOtp(order) {
+  const txn = getReleaseTxn(order.id);
+  if (!txn || txn.status !== 'PENDING') { const e = new Error('No release is awaiting authorization'); e.status = 409; throw e; }
+  if (order.account_mode !== 'LIVE') return { ok: true, simulated: true };
+  await monnify.resendOtp(txn.monnify_reference);
+  return { ok: true };
 }
 
 /* ─────────────────── reverse to buyer (REVERSED) ─────────────────── */
@@ -360,7 +425,8 @@ export async function resolveByHuman(order, { decision, note }) {
     const e = new Error(`Order ${order.ref} is not under review`); e.status = 409; throw e;
   }
   if (decision === 'RELEASE') {
-    return releaseToVendor(order, { trigger: 'HUMAN_RELEASE' });
+    const r = await releaseToVendor(order, { trigger: 'HUMAN_RELEASE' });
+    return r.order || getOrderById(order.id);
   }
   if (decision === 'REVERSE') {
     return reverseToBuyer(order, { trigger: 'HUMAN_REVERSE', reason: note || 'Reviewer reversed to buyer.' });
@@ -375,18 +441,27 @@ async function splitResolution(order, note) {
   const amount = order.amount_paid ?? order.amount;
   const half = Math.round((amount / 2) * 100) / 100;
 
-  await recordMoney(order.id, 'RELEASE', half, `${order.id}-release`, async () => {
+  // Release half (vendor). May land PENDING if the wallet has Transfer-2FA — authorizeRelease completes it.
+  if (!getReleaseTxn(order.id)) {
     if (order.account_mode === 'LIVE') {
-      const ref = `LL-SPL-REL-${order.id.slice(-8)}`;
-      const res = await monnify.disburseSingle({
-        amount: half, reference: ref, narration: `LinkLock split release ${order.ref}`,
-        destinationBankCode: order.vendor_bank_code, destinationAccountNumber: order.vendor_account_number,
-        destinationAccountName: order.vendor_account_name || 'Vendor',
-      });
-      return interpretDisbursement(res, ref);
+      const ref = `LL-SPL-REL-${order.id.slice(-8)}-${Math.random().toString(36).slice(2, 6)}`;
+      const txn = insertPendingRelease(order.id, half, ref, { split: true });
+      let res;
+      try {
+        res = await monnify.disburseSingle({
+          amount: half, reference: ref, narration: `LinkLock split release ${order.ref}`,
+          destinationBankCode: order.vendor_bank_code, destinationAccountNumber: order.vendor_account_number,
+          destinationAccountName: order.vendor_account_name || order.vendor_name || 'Vendor',
+        });
+      } catch (err) { db.prepare('DELETE FROM transactions WHERE id = ?').run(txn.id); throw err; }
+      if (SUCCESS_STATUSES.includes(res?.status)) markTxn(txn.id, 'SUCCESS', res.reference || ref, { monnifyStatus: res.status, split: true });
+      else if (res?.status !== 'PENDING_AUTHORIZATION') { db.prepare('DELETE FROM transactions WHERE id = ?').run(txn.id); const e = new Error(`Split disbursement failed (${res?.status})`); e.status = 502; throw e; }
+      // PENDING_AUTHORIZATION → leave PENDING; operator authorizes the payout half via OTP.
+    } else {
+      const txn = insertPendingRelease(order.id, half, `SIM-SPL-REL-${order.id.slice(-6)}`, { simulated: true, half });
+      markTxn(txn.id, 'SUCCESS', txn.monnify_reference, { simulated: true, half });
     }
-    return { status: 'SUCCESS', reference: `SIM-SPL-REL-${order.id.slice(-6)}`, detail: { simulated: true, half } };
-  });
+  }
   await recordMoney(order.id, 'REVERSAL', half, `${order.id}-reversal`, async () => {
     if (hasRealPayment(order)) {
       const res = await monnify.initiateRefund({
@@ -416,9 +491,13 @@ export async function runDefaultReleaseSweep() {
   ).all(now());
   const released = [];
   for (const order of due) {
+    // Skip orders whose default-release is already initiated and just awaiting OTP.
+    const rel = getReleaseTxn(order.id);
+    if (rel?.status === 'PENDING') continue;
     try {
-      await releaseToVendor(order, { trigger: 'DEFAULT_RELEASE' });
-      released.push(order.ref);
+      const r = await releaseToVendor(order, { trigger: 'DEFAULT_RELEASE' });
+      if (r.released) released.push(order.ref);
+      else if (r.authorizationRequired) console.log(`[sweep] ${order.ref} default-release initiated — awaiting Monnify OTP authorization`);
     } catch (err) {
       console.error(`[sweep] default-release failed for ${order.ref}: ${err.message}`);
     }
@@ -478,10 +557,12 @@ export function serializeOrder(order, { includePrivate = false } = {}) {
     .map((t) => ({ id: t.id, type: t.type, amount: t.amount, status: t.status, monnifyReference: t.monnify_reference, detail: parse(t.detail), occurredAt: t.occurred_at }));
   const dispute = getDisputeByOrder(order.id);
   const messages = listMessages(order.id).map((m) => ({ id: m.id, audience: m.audience, kind: m.kind, body: m.body, createdAt: m.created_at }));
+  const pendingRelease = transactions.find((t) => t.type === 'RELEASE' && t.status === 'PENDING');
 
   return {
     id: order.id,
     ref: order.ref,
+    releaseAuthorization: pendingRelease ? { required: true, reference: pendingRelease.monnifyReference } : null,
     itemDescription: order.item_description,
     amount: order.amount,
     amountPaid: order.amount_paid,
