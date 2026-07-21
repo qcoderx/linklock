@@ -79,8 +79,8 @@ npm run install:all
 cp backend/.env.example backend/.env      # then edit backend/.env
 
 # 3. run (two terminals)
-npm run dev:backend      # http://localhost:4000
-npm run dev:frontend     # http://localhost:5173
+npm run dev      # http://localhost:4000
+npm run dev     # http://localhost:5173
 ```
 
 Open **http://localhost:5173**, generate a link, and follow it. The review console is at **/console** (`ADMIN_TOKEN`, dev default `linklock-admin-dev`).

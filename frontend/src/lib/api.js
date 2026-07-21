@@ -1,5 +1,6 @@
 // Tiny fetch wrapper around the LinkLock API (proxied to :4000 in dev).
-const BASE = '/api';
+// In production, set VITE_API_URL to the deployed backend's origin.
+const BASE = `${import.meta.env.VITE_API_URL || ''}/api`;
 
 async function req(path, { method = 'GET', body, form, token } = {}) {
   const headers = {};
