@@ -158,9 +158,10 @@ export async function getBanks() {
  * Free on sandbox and live. Returns { accountNumber, accountName, bankCode }.
  */
 export async function validateAccount({ accountNumber, bankCode }) {
-  return authed(
-    `/api/v1/disbursements/account/validate?accountNumber=${encodeURIComponent(accountNumber)}&bankCode=${encodeURIComponent(bankCode)}`,
-  );
+  return authed('/api/v2/disbursements/account/validate', {
+    method: 'POST',
+    body: { accountNumber, bankCode },
+  });
 }
 
 /**
